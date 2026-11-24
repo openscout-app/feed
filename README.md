@@ -7,7 +7,7 @@ Open a finished piece of local agent work in the Feed. Expand the item to read t
 From any directory with Node.js 20.11 or later, run:
 
 ```sh
-npx --yes github:openscout-app/feed
+npx --yes https://github.com/openscout-app/feed/tarball/main
 ```
 
 When the full Scout web app is already running on this machine, the command opens its Feed directly at **http://127.0.0.1:43120/embed/feed**. The launcher exits and the app keeps running.
