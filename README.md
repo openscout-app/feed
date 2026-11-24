@@ -1,6 +1,20 @@
-# Scout App Preview
+# Scout Feed
 
 Open a finished piece of local agent work in the Feed. Expand the item to read the result, or choose **Open in Chat** to see the request and reply that produced it. The preview uses the Scout app's Feed client and the [public Scout runtime](https://github.com/openscout-app/scout).
+
+## Open Feed with npx
+
+From any directory with Node.js 20.11 or later, run:
+
+```sh
+npx --yes github:openscout-app/feed
+```
+
+When the full Scout web app is already running on this machine, the command opens its Feed directly at **http://127.0.0.1:43120/embed/feed**. The launcher exits and the app keeps running.
+
+On a machine with just the local Scout runtime, the command starts the read-only preview with that runtime's work. On a new machine, it starts a temporary runtime and shows **Nothing finished yet** until there is work to show. The preview opens on a free loopback port and prints the URL. Press **Ctrl-C** to stop it. If the preview needs Bun, npm can fetch the pinned version on the first run.
+
+Use `--no-open` to print the URL without opening a browser. Use `--standalone` to try the preview with a fresh, empty runtime, or set `SCOUT_PREVIEW_BROKER_URL` to select the runtime you want to read.
 
 ## Start the preview
 

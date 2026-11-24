@@ -1,14 +1,23 @@
 {
-  "name": "scout-app-preview",
+  "name": "@openscout/feed",
+  "version": "0.1.0",
+  "bin": { "scout-feed": "bin/scout-feed.mjs" },
   "private": true,
   "type": "module",
-  "engines": { "bun": ">=1.4.4" },
+  "engines": { "node": ">=20.11" },
   "workspaces": ["packages/web/client"],
   "scripts": {
     "start": "bun install --frozen-lockfile --ignore-scripts && bun scripts/preview.ts",
     "check": "tsc --noEmit && tsc -p packages/web/client/tsconfig.json --noEmit",
     "test": "bun test packages scripts"
   },
-  "dependencies": { "@openscout/scout": "0.5.4" },
+  "dependencies": {
+    "@openscout/scout": "0.5.4",
+    "@openscout/protocol": "0.5.4",
+    "@trpc/client": "11.17.0",
+    "lucide-react": "0.577.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
   "devDependencies": { "@types/bun": "^1.3.0", "typescript": "5.9.3" }
 }

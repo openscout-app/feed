@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { openFeed } from "../bin/open-feed.mjs";
 import { servePreview } from "./preview-host.ts";
 
 const port = Number(process.env.SCOUT_PREVIEW_PORT ?? 4173);
@@ -48,7 +49,7 @@ try {
       // a block for the installed runtime. Do not select an overlapping block.
       if (candidate <= 65494 && (candidate < 43069 || candidate > 43151)) base = candidate;
     }
-    const entry = join(import.meta.dir, "../node_modules/@openscout/scout/bin/openscout-runtime.mjs");
+    const entry = Bun.resolveSync("@openscout/scout/bin/openscout-runtime.mjs", import.meta.dir);
     child = spawn(process.execPath, ["--no-env-file", entry, "broker"], {
       cwd: temp, stdio: ["ignore", "pipe", "pipe"],
       env: {
@@ -77,6 +78,7 @@ try {
   }
   host = await servePreview(brokerUrl, port);
   console.log(`Scout App Preview: ${host.url.origin}/embed/feed\n${child ? "New temporary Scout runtime" : "Reading the selected local Scout runtime"} · Ctrl-C to stop`);
+  if (process.env.SCOUT_PREVIEW_OPEN === "1") openFeed(host.url.origin + "/embed/feed");
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   await stop(1);
