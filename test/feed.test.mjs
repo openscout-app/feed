@@ -13,7 +13,19 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
     path.join(claudeDir, "sess-101.jsonl"),
     [
       JSON.stringify({ type: "user", cwd: "/tmp/demo-app", sessionId: "sess-101", message: { content: "Add dark mode tokens" } }),
-      JSON.stringify({ type: "assistant", cwd: "/tmp/demo-app", sessionId: "sess-101", message: { content: [{ type: "text", text: "Added dark mode token variables and verified contrast." }] } }),
+      JSON.stringify({
+        type: "assistant",
+        cwd: "/tmp/demo-app",
+        gitBranch: "feat/dark-tokens",
+        sessionId: "sess-101",
+        message: {
+          content: [
+            { type: "tool_use", name: "Edit", input: { file_path: "/tmp/demo-app/src/tokens.css" } },
+            { type: "tool_use", name: "Write", input: { file_path: "/tmp/demo-app/src/theme.ts" } },
+            { type: "text", text: "Added dark mode token variables and verified contrast.\nMerged https://github.com/acme/demo-app/pull/42" },
+          ],
+        },
+      }),
     ].join("\n") + "\n",
   );
 
@@ -50,4 +62,14 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
   assert.equal(feed.posts.length, 1);
   assert.equal(feed.posts[0].title, "Added dark mode token variables and verified contrast.");
   assert.equal(feed.posts[0].agent.harness, "claude");
+  assert.deepEqual(feed.posts[0].change, { files: 2, additions: null, deletions: null });
+  assert.equal(feed.posts[0].prs.length, 1);
+  assert.equal(feed.posts[0].prs[0].key, "demo-app#42");
+  assert.equal(feed.posts[0].prs[0].state, "merged");
+
+  const detailRes = await fetch(`${base}/api/feed/post/${encodeURIComponent(feed.posts[0].id)}`);
+  assert.equal(detailRes.status, 200);
+  const detail = await detailRes.json();
+  assert.equal(detail.branch, "feat/dark-tokens");
+  assert.equal(detail.prs.length, 1);
 });
