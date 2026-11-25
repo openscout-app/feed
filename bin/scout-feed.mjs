@@ -1,100 +1,95 @@
 #!/usr/bin/env node
-import { execFile, spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, symlink } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
-import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { fullFeedAvailable, hasLocalRuntime } from "./local-scout.mjs";
-import { openFeed } from "./open-feed.mjs";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { checkRuntime, runtimeUrl, runScoutSetup, scanLocalFeedSessions } from "../server/runtime.mjs";
+import { DIST, serve } from "../server/serve.mjs";
 
-const web = "http://127.0.0.1:43120";
-const runtime = "http://127.0.0.1:43110";
-
-async function findBun() {
-  const version = spawnSync("bun", ["--version"], { encoding: "utf8" }).stdout?.trim();
-  const [major, minor, patch] = (version ?? "").split(".").map(Number);
-  const localBun = major > 1 || (major === 1 && (minor > 4 || (minor === 4 && patch >= 4)));
-  if (localBun) return "bun";
-  const npm = process.env.npm_execpath;
-  if (!npm) throw new Error("Start with npx or install Bun 1.4.4 or later.");
-  // Start Bun directly even when npm supplies it, so signals reach the preview.
-  const { stdout } = await promisify(execFile)(process.execPath, [
-    npm, "exec", "--yes", "--package=bun@1.4.4", "--", "bun", "--print", "process.execPath",
-  ]);
-  return stdout.trim();
-}
-
-async function linkPreviewRuntime(entry) {
-  // The pinned preview uses a package-local runtime path even when npm or Bun hoists it.
-  const scope = resolve(dirname(entry), "../node_modules/@openscout");
-  const target = join(scope, "scout");
-  const runtimeEntry = join(target, "bin/openscout-runtime.mjs");
-  if (existsSync(runtimeEntry)) return;
-  const source = dirname(createRequire(entry).resolve("@openscout/scout/package.json"));
-  await mkdir(scope, { recursive: true });
-  try {
-    await symlink(process.platform === "win32" ? source : relative(scope, source), target, "junction");
-  } catch (error) {
-    if (error.code !== "EEXIST" || !existsSync(runtimeEntry)) throw error;
-  }
-}
-
-async function startPreview(open, standalone) {
-  const env = { ...process.env, SCOUT_PREVIEW_OPEN: open ? "1" : "0" };
-  // The OS can allocate a free port even when another preview is running.
-  env.SCOUT_PREVIEW_PORT ??= "0";
-  if (!standalone && !env.SCOUT_PREVIEW_BROKER_URL && await hasLocalRuntime(runtime)) {
-    env.SCOUT_PREVIEW_BROKER_URL = runtime;
-  }
-
-  const entry = fileURLToPath(import.meta.resolve("scout-app/scripts/preview.ts"));
-  if (!env.SCOUT_PREVIEW_BROKER_URL) await linkPreviewRuntime(entry);
-  const bun = await findBun();
-  const child = spawn(bun, ["--no-env-file", entry], {
-    // On Unix, only the launcher should receive the terminal's Ctrl-C.
-    detached: process.platform !== "win32",
-    stdio: ["ignore", open ? "pipe" : "inherit", "inherit"], env,
-  });
-  if (child.stdout) {
-    child.stdout.pipe(process.stdout, { end: false });
-    // The pinned preview prints the URL but does not open it.
-    const lines = createInterface({ input: child.stdout });
-    lines.on("line", line => {
-      const match = /^Scout App Preview: (http:\/\/127\.0\.0\.1:\d{1,5}\/embed\/feed)$/.exec(line);
-      if (match) {
-        lines.close();
-        openFeed(match[1]);
-      }
-    });
-  }
-  for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
-  child.once("error", error => { console.error(error.message); process.exitCode = 1; });
-  child.once("exit", (code, signal) => { process.exitCode = code ?? (signal === "SIGINT" ? 130 : 1); });
-}
-
+const FIRST_PORT = 4806;
 const args = process.argv.slice(2);
+const opt = (flag) => {
+  const idx = args.indexOf(flag);
+  return idx >= 0 ? args[idx + 1] : undefined;
+};
+
+const HELP = `Usage:
+  scout-feed [--port <n>] [--no-open]
+      Serve Scout Feed from prebuilt HTML on http://127.0.0.1:4806, populated
+      from local session history and Scout's runtime.
+
+  scout-feed setup
+      Install and start Scout's local runtime via the Scout CLI so new asks,
+      shows, and completed runs stream into the Feed.
+
+  scout-feed status [--json]
+      Report Scout runtime connectivity and discovered local sessions.`;
+
 if (args.includes("--help") || args.includes("-h")) {
-  console.log("Usage: scout-feed [--no-open] [--standalone]\nOpen the local Feed. --standalone always starts the read-only preview.");
-} else if (args.some(arg => !["--no-open", "--standalone"].includes(arg))) {
-  console.error("Usage: scout-feed [--no-open] [--standalone]");
-  process.exitCode = 2;
-} else {
-  const open = !args.includes("--no-open");
-  const standalone = args.includes("--standalone");
-  const useApp = !standalone && !process.env.SCOUT_PREVIEW_BROKER_URL && !process.env.SCOUT_PREVIEW_PORT;
-  if (useApp && await fullFeedAvailable(web)) {
-    const url = web + "/embed/feed";
-    console.log("Scout Feed: " + url);
-    if (open) openFeed(url);
+  console.log(HELP);
+  process.exit(0);
+}
+
+if (args[0] === "setup") {
+  try {
+    runScoutSetup();
+    console.log(`Scout runtime is ready at ${runtimeUrl()}.`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`scout-feed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
+if (args[0] === "status") {
+  const url = runtimeUrl();
+  const up = await checkRuntime(url);
+  const localSessions = scanLocalFeedSessions().length;
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ runtimeUp: up, runtimeUrl: url, localSessions }, null, 2));
   } else {
-    try {
-      await startPreview(open, standalone);
-    } catch (error) {
-      console.error(error.message);
-      process.exitCode = 1;
+    console.log(`Runtime:  ${up ? `up at ${url}` : "not running (run scout-feed setup to start it)"}`);
+    console.log(`Sessions: ${localSessions} recent local transcripts discovered`);
+  }
+  process.exit(0);
+}
+
+if (!fs.existsSync(path.join(DIST, "index.html"))) {
+  console.error("scout-feed: dist/index.html is missing. Run `npm run build` first.");
+  process.exit(1);
+}
+
+const requested = Number(opt("--port") ?? process.env.SCOUT_FEED_PORT ?? 0);
+const startPort = requested || FIRST_PORT;
+const open = !args.includes("--no-open");
+
+function openBrowser(url) {
+  if (!open) return;
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const cmdArgs = process.platform === "win32" ? ["/c", "start", url] : [url];
+  execFile(cmd, cmdArgs, () => {});
+}
+
+for (let port = startPort; port < startPort + (requested ? 1 : 10); port++) {
+  try {
+    await serve(port);
+    const url = `http://127.0.0.1:${port}`;
+    console.log(`Scout Feed: ${url}`);
+    openBrowser(url);
+    break;
+  } catch (err) {
+    if (err?.code === "EADDRINUSE") {
+      try {
+        const check = await fetch(`http://127.0.0.1:${port}/api/identity`, { signal: AbortSignal.timeout(800) });
+        if (check.ok && (await check.json()).app === "@openscout/feed") {
+          const url = `http://127.0.0.1:${port}`;
+          console.log(`Scout Feed is already running at ${url}`);
+          openBrowser(url);
+          process.exit(0);
+        }
+      } catch {}
+      if (!requested) continue;
     }
+    console.error(`scout-feed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
   }
 }
