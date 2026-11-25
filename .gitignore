@@ -1,7 +1,6 @@
 # OpenScout local state
-.openscout/project.json
+.openscout/
 
-# Local dependencies and build output
+# Local dependencies
 node_modules/
-dist/
 .DS_Store

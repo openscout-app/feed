@@ -1,23 +1,40 @@
 {
   "name": "@openscout/feed",
-  "version": "0.1.0",
-  "bin": { "scout-feed": "bin/scout-feed.mjs" },
-  "files": ["bin"],
-  "private": true,
+  "version": "0.2.0",
+  "description": "Finished work from your coding agents, in one local Feed. Prebuilt HTML served on loopback and backed by the Scout CLI.",
   "license": "Apache-2.0",
+  "homepage": "https://openscout.app/feed",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openscout-app/feed.git"
+  },
   "type": "module",
-  "engines": { "node": ">=20.11" },
+  "bin": {
+    "scout-feed": "bin/scout-feed.mjs"
+  },
+  "files": [
+    "bin",
+    "server/*.mjs",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
     "start": "node bin/scout-feed.mjs",
-    "test": "bun test scripts"
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@openscout/scout": "0.5.4",
-    "@openscout/protocol": "0.5.4",
-    "@trpc/client": "11.17.0",
-    "lucide-react": "0.577.0",
+    "@openscout/scout": "^0.5.4"
+  },
+  "devDependencies": {
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "scout-app": "github:openscout-app/scout-app#05db573"
+    "scout-app": "github:openscout-app/scout-app#4789899",
+    "vite": "^7.0.0"
   }
 }
