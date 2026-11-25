@@ -72,4 +72,14 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
   const detail = await detailRes.json();
   assert.equal(detail.branch, "feat/dark-tokens");
   assert.equal(detail.prs.length, 1);
+
+  // 4. Session drill-down returns full structured ObserveData (tool beats + prompt + reply).
+  const sessionRes = await fetch(`${base}/api/session-ref/sess-101`);
+  assert.equal(sessionRes.status, 200);
+  const sessionRef = await sessionRes.json();
+  assert.equal(sessionRef.observe.project, "demo-app");
+  assert.equal(sessionRef.observe.data.metadata.session.branch, "feat/dark-tokens");
+  assert.equal(sessionRef.observe.data.events.length, 4);
+  assert.equal(sessionRef.observe.data.events[1].tool, "Edit");
+  assert.equal(sessionRef.observe.data.events[2].tool, "Write");
 });
