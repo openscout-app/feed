@@ -38,7 +38,10 @@ function headFromItem(item, version) {
   const label = item.source === "claude" ? "Claude Code"
     : item.source === "codex" ? "Codex"
       : item.source === "antigravity" ? "Antigravity"
-        : item.agentName || "Scout Agent";
+        : item.source === "kimi" ? "Kimi"
+          : item.agentName || "Scout Agent";
+  const files = Array.isArray(item.filesTouched) ? item.filesTouched.length : 0;
+  const prs = Array.isArray(item.prs) ? item.prs : [];
   return {
     id: item.id,
     version,
@@ -57,10 +60,10 @@ function headFromItem(item, version) {
     thread: item.project,
     state: "done",
     lead: { kind: "text", ref: null },
-    change: null,
+    change: files > 0 ? { files, additions: null, deletions: null } : null,
     joined: [],
-    prs: [],
-    prCount: 0,
+    prs,
+    prCount: prs.length,
     forYou: null,
     backToYou: false,
     updates: 0,
@@ -217,10 +220,10 @@ export async function handle(req, res) {
       id: item.id,
       version: item.at,
       asked: item.asked,
-      branch: null,
+      branch: item.branch || null,
       body: { landed: item.body, checks: null, next: null, open: null },
       earlier: [],
-      prs: [],
+      prs: head.prs,
       leads: [head.lead],
       diff: null,
       agents: [head.agent],

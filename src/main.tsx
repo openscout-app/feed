@@ -60,7 +60,7 @@ function App() {
     : null;
 
   return (
-    <ScoutAppFrame product="Feed" variant="feed" pages={PAGES} status={badge} setupCallout={callout}>
+    <ScoutAppFrame product="Feed" variant="feed" rail="reading" pages={PAGES} status={badge} setupCallout={callout}>
       <FeedStandaloneSurface />
     </ScoutAppFrame>
   );
