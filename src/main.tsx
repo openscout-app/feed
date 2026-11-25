@@ -1,17 +1,28 @@
 import { createRoot } from "react-dom/client";
 import { FeedStandaloneSurface } from "scout-app/feed";
-import { ScoutThinApp, type ScoutThinStatusBase } from "scout-app/shell";
+import {
+  FeedGlyph,
+  ScoutThinApp,
+  type ScoutPageTab,
+  type ScoutThinStatusBase,
+} from "scout-app/shell";
 import "scout-app/shell.css";
 
 interface FeedHostStatus extends ScoutThinStatusBase {
   localSessions: number;
 }
 
+const FEED_PAGES: readonly ScoutPageTab[] = [
+  { id: "feed", label: "Feed", route: "/", icon: FeedGlyph },
+];
+
 createRoot(document.getElementById("root")!).render(
   <ScoutThinApp<FeedHostStatus>
     product="Feed"
     variant="feed"
     rail="reading"
+    pages={FEED_PAGES}
+    chrome="sidebar"
     badge={(status) =>
       !status
         ? { label: "Checking Scout", tone: "loading" }
