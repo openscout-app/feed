@@ -6,7 +6,7 @@ the exchange that produced it.
 
 ## Open the Feed
 
-With Node.js 20.11 or later, run:
+With Node.js 20.11 or later, run the Feed directly from this GitHub repository:
 
 ```sh
 npx openscout-app/feed
