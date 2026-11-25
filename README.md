@@ -1,8 +1,10 @@
 # Scout Feed
 
-Open a finished piece of local agent work in the Feed. Expand the item to read the result, or choose **Open in Chat** to see the request and reply that produced it. The preview uses the Scout app's Feed client and the [public Scout runtime](https://github.com/openscout-app/scout).
+This launcher opens the Feed from [Scout App](https://github.com/openscout-app/scout-app).
+Expand a finished item to read the result, or choose **Open in Chat** to see
+the exchange that produced it.
 
-## Open Feed with npx
+## Open the Feed
 
 With Node.js 20.11 or later, run the Feed directly from this GitHub repository:
 
@@ -10,45 +12,40 @@ With Node.js 20.11 or later, run the Feed directly from this GitHub repository:
 npx openscout-app/feed
 ```
 
-When the full Scout web app is already running on this machine, the command opens its Feed directly at **http://127.0.0.1:43120/embed/feed**. The launcher exits and the app keeps running.
+If the full Scout web app is running locally, the launcher opens
+`http://127.0.0.1:43120/embed/feed` and exits. The app keeps running.
 
-On a machine with just the local Scout runtime, the command starts the read-only preview with that runtime's work. On a new machine, it starts a temporary runtime and shows **Nothing finished yet** until there is work to show. The preview opens on a free loopback port and prints the URL. Press **Ctrl-C** to stop it. If the preview needs Bun, npm can fetch the pinned version on the first run.
+Otherwise, the launcher starts Scout App's read-only preview on a free loopback
+port. The preview reads from the local Scout runtime if one is available. If
+there is no runtime, the preview starts a temporary one and shows **Nothing
+finished yet**. The launcher prints the URL. Press **Ctrl-C** to stop the
+preview and remove any temporary runtime data. If Bun 1.4.4 or later is not
+installed, npm fetches Bun 1.4.4 on the first run.
 
-Use `--no-open` to print the URL without opening a browser. Use `--standalone` to try the preview with a fresh, empty runtime, or set `SCOUT_PREVIEW_BROKER_URL` to select the runtime you want to read.
+- `--no-open` prints the URL without opening a browser.
+- `--standalone` skips detection of the installed app and runtime.
+- `SCOUT_PREVIEW_BROKER_URL` starts the preview with the loopback runtime you
+  specify, for example `http://127.0.0.1:43110`. The preview does not start or
+  stop that runtime.
+- `SCOUT_PREVIEW_PORT` starts the preview on the port you specify. Use `0` to
+  select a free port.
 
-## Start the preview
-
-Install [Bun](https://bun.sh) 1.4.4 or later. From the root of a fresh checkout, run:
-
-```sh
-bun run start
-```
-
-Open **http://127.0.0.1:4173/embed/feed**. The command installs the locked public dependencies, builds the client, and starts a temporary Scout runtime on loopback. It does not require a Scout account, another checkout, or an installed Scout service. The first install needs internet access.
-
-A new runtime has no work. Its Feed says **Nothing finished yet.** It does not load sample posts. To see your own work, connect an existing runtime as described below. Press **Ctrl-C** to stop the preview and remove the temporary runtime data. The installed dependencies remain in `node_modules/`.
-
-## Read your local work
-
-If you already run Scout with the Feed work API (tested with 0.5.4), specify its loopback HTTP origin instead:
+To start the preview with a temporary runtime without opening a browser, run:
 
 ```sh
-SCOUT_PREVIEW_BROKER_URL=http://127.0.0.1:43110 bun run start
+npx openscout-app/feed --standalone --no-open
 ```
 
-This mode reads the runtime you named. It does not start, restart, or stop it. If the runtime cannot serve the Feed, the page reports a read failure rather than showing an empty Feed. A runtime that requires credentials is not supported. The preview does not forward tokens or expose write endpoints.
+Use the printed loopback URL. Do not expose the preview through a tunnel or
+reverse proxy. The Feed can contain private messages and media.
 
-- Click an item to open its detail. **Esc** closes it.
-- **Open in Chat** follows both the conversation ID and work ID. A newer message in the same chat does not replace the recorded exchange. If the reply is missing, Chat says so.
-- A standalone post has no task discussion. If it names an original harness session, the preview offers that session instead.
-- The preview reads the last 14 days. It polls for changes. Sending replies, moving work, provider connections, and hosted enrichment are not part of this preview.
+## Test the launcher
 
-Use the printed loopback URL. Do not expose it through a tunnel or reverse proxy: local records may contain private messages or media. To choose another web port, set `SCOUT_PREVIEW_PORT` (use `0` to select a free port).
+With Bun 1.4.4 or later, run `bun install` and `bun test`. To run the launcher
+from the checkout, use `node bin/scout-feed.mjs`.
 
-## Check the checkout
+## Licenses
 
-After installing dependencies, run `bun run check` for both TypeScript projects and `bun run test` for the client, API, and host tests. The [local Feed API guide](packages/web/server/feed/README.md) also documents a compatibility check that writes test-owned records into a temporary public-core SQLite database. Neither the tests nor the first run need a copy of anyone's activity.
-
-## License
-
-This Feed preview is licensed under the [Apache License, Version 2.0](LICENSE). It identifies harnesses by name, without their logos.
+This launcher uses the [Apache License, Version 2.0](LICENSE).
+[Scout App](https://github.com/openscout-app/scout-app/blob/05db573/LICENSE)
+uses PolyForm Shield 1.0.0.
