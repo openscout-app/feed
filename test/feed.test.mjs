@@ -83,3 +83,22 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
   assert.equal(sessionRef.observe.data.events[1].tool, "Edit");
   assert.equal(sessionRef.observe.data.events[2].tool, "Write");
 });
+
+test("package.json stays npx-safe from git without triggering npm prepare/devDependencies", () => {
+  const pkgPath = new URL("../package.json", import.meta.url);
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+  assert.equal(pkg.workspaces, undefined, "git packages with workspaces trigger npm git-dep preparation");
+  const scripts = pkg.scripts ?? {};
+  // pacote's GitFetcher.#prepareDir runs `npm install` (including devDependencies)
+  // whenever any of these script names is present in a git-installed package.
+  const prepareTriggers = ["postinstall", "build", "preinstall", "install", "prepack", "prepare"];
+  for (const name of prepareTriggers) {
+    assert.equal(
+      scripts[name],
+      undefined,
+      `scripts.${name} triggers npm git-dep preparation during npx openscout-app/feed`,
+    );
+  }
+  assert.ok(fs.existsSync(new URL("../dist/index.html", import.meta.url)), "prebuilt dist/index.html must be committed");
+  assert.ok(fs.existsSync(new URL("../dist/thin-server.mjs", import.meta.url)), "prebuilt dist/thin-server.mjs must be committed");
+});
