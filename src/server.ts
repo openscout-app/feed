@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -98,9 +100,67 @@ function headFromItem(item: FeedItemRecord, version: number) {
   };
 }
 
-async function readFeedSnapshot() {
+function configuredRuntimeUrl(explicit: boolean) {
   const base = runtimeUrl();
+  if (explicit) return base;
+
+  // The pinned thin-server helper only reads the legacy top-level port.
+  try {
+    const home = process.env.SCOUT_SESSIONS_HOME || process.env.HOME || os.homedir();
+    const config = JSON.parse(fs.readFileSync(path.join(home, ".openscout", "config.json"), "utf8"));
+    if (typeof config?.url === "string" && /^https?:\/\//i.test(config.url)) {
+      return config.url.replace(/\/+$/, "");
+    }
+    const port = config?.ports?.broker ?? config?.port ?? 43110;
+    if (typeof config?.host === "string" && config.host.trim()) {
+      const host = config.host.trim();
+      if (!["0.0.0.0", "::", "[::]"].includes(host)) {
+        return `http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}`;
+      }
+    }
+    if (config?.ports?.broker != null) return `http://127.0.0.1:${port}`;
+  } catch {}
+  return base;
+}
+
+async function resolveRuntime() {
+  const explicit = process.env.SCOUT_RUNTIME_URL !== undefined || process.env.OPENSCOUT_BROKER_URL !== undefined;
+  const base = configuredRuntimeUrl(explicit);
   const up = await checkRuntime(base);
+  if (!up && !explicit) {
+    let port = "43110";
+    try {
+      port = new URL(base).port || port;
+    } catch {}
+    const loopback = `http://127.0.0.1:${port}`;
+    if (loopback !== base && await checkRuntime(loopback)) return { base: loopback, up: true };
+  }
+  return { base, up };
+}
+
+// Match the full reply so a substantive response that starts with a login
+// instruction still makes it into the feed.
+const LOCAL_SESSION_NOISE = [
+  /^Login reached its time limit(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
+  /^Please run \/login[.!]?$/i,
+  /^Not logged in(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
+  /^You['’]ve hit your limit(?:\s*[·—-]\s*resets? [^\r\n]+)?[.!]?$/i,
+];
+
+function localFeedSessions() {
+  return scanLocalFeedSessions().filter(({ title, body }) => {
+    const text = (body || title).trim().replace(/^#+\s*/, "");
+    return !LOCAL_SESSION_NOISE.some((pattern) => pattern.test(text));
+  });
+}
+
+async function getStatus() {
+  const { base, up } = await resolveRuntime();
+  return { runtimeUp: up, runtimeUrl: base, localSessions: localFeedSessions().length };
+}
+
+async function readFeedSnapshot() {
+  const { base, up } = await resolveRuntime();
   const items = new Map<string, FeedItemRecord>();
 
   if (up) {
@@ -133,7 +193,7 @@ async function readFeedSnapshot() {
     } catch {}
   }
 
-  for (const local of scanLocalFeedSessions()) {
+  for (const local of localFeedSessions()) {
     if (!items.has(local.id)) items.set(local.id, local);
   }
 
@@ -144,8 +204,12 @@ const SERVER_OPTIONS: ScoutThinServerOptions = {
   packageName: "@openscout/feed",
   product: "Feed",
   distDir: DIST,
-  getStatus: () => ({ localSessions: scanLocalFeedSessions().length }),
   apiHandler: async (req, res, { url, pathname }) => {
+    if (req.method === "GET" && pathname === "/api/status") {
+      sendJson(res, 200, await getStatus());
+      return true;
+    }
+
     if (req.method === "GET" && pathname === "/api/feed/sources") {
       sendJson(res, 200, { outside: [], quota: [] });
       return true;
@@ -240,11 +304,10 @@ export function cli(argv = process.argv.slice(2)) {
       help: HELP,
       createServer: createFeedServer,
       getStatus: async () => {
-        const url = runtimeUrl();
-        const runtimeUp = await checkRuntime(url);
-        const localSessions = scanLocalFeedSessions().length;
+        const json = await getStatus();
+        const { runtimeUp, runtimeUrl: url, localSessions } = json;
         return {
-          json: { runtimeUp, runtimeUrl: url, localSessions },
+          json,
           lines: [
             `Runtime:  ${runtimeUp ? `up at ${url}` : "not running (run scout-feed setup to start it)"}`,
             `Sessions: ${localSessions} recent local transcripts discovered`,
