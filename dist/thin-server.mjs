@@ -1,10 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync, execFile } from "node:child_process";
-import fs from "node:fs";
 import http from "node:http";
 import { createRequire } from "node:module";
-import os from "node:os";
 const require$1 = createRequire(import.meta.url);
 const DEFAULT_WINDOW_MS = 14 * 24 * 36e5;
 const PR_URL_RE = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g;
@@ -1098,9 +1098,60 @@ function headFromItem(item, version) {
     project: item.project
   };
 }
-async function readFeedSnapshot() {
+function configuredRuntimeUrl(explicit) {
   const base = runtimeUrl();
+  if (explicit) return base;
+  try {
+    const home = process.env.SCOUT_SESSIONS_HOME || process.env.HOME || os.homedir();
+    const config = JSON.parse(fs.readFileSync(path.join(home, ".openscout", "config.json"), "utf8"));
+    if (typeof config?.url === "string" && /^https?:\/\//i.test(config.url)) {
+      return config.url.replace(/\/+$/, "");
+    }
+    const port = config?.ports?.broker ?? config?.port ?? 43110;
+    if (typeof config?.host === "string" && config.host.trim()) {
+      const host = config.host.trim();
+      if (!["0.0.0.0", "::", "[::]"].includes(host)) {
+        return `http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}`;
+      }
+    }
+    if (config?.ports?.broker != null) return `http://127.0.0.1:${port}`;
+  } catch {
+  }
+  return base;
+}
+async function resolveRuntime() {
+  const explicit = process.env.SCOUT_RUNTIME_URL !== void 0 || process.env.OPENSCOUT_BROKER_URL !== void 0;
+  const base = configuredRuntimeUrl(explicit);
   const up = await checkRuntime(base);
+  if (!up && !explicit) {
+    let port = "43110";
+    try {
+      port = new URL(base).port || port;
+    } catch {
+    }
+    const loopback = `http://127.0.0.1:${port}`;
+    if (loopback !== base && await checkRuntime(loopback)) return { base: loopback, up: true };
+  }
+  return { base, up };
+}
+const LOCAL_SESSION_NOISE = [
+  /^Login reached its time limit(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
+  /^Please run \/login[.!]?$/i,
+  /^Not logged in(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
+  /^You['’]ve hit your limit(?:\s*[·—-]\s*resets? [^\r\n]+)?[.!]?$/i
+];
+function localFeedSessions() {
+  return scanLocalFeedSessions().filter(({ title, body }) => {
+    const text = (body || title).trim().replace(/^#+\s*/, "");
+    return !LOCAL_SESSION_NOISE.some((pattern) => pattern.test(text));
+  });
+}
+async function getStatus() {
+  const { base, up } = await resolveRuntime();
+  return { runtimeUp: up, runtimeUrl: base, localSessions: localFeedSessions().length };
+}
+async function readFeedSnapshot() {
+  const { base, up } = await resolveRuntime();
   const items = /* @__PURE__ */ new Map();
   if (up) {
     try {
@@ -1132,7 +1183,7 @@ async function readFeedSnapshot() {
     } catch {
     }
   }
-  for (const local of scanLocalFeedSessions()) {
+  for (const local of localFeedSessions()) {
     if (!items.has(local.id)) items.set(local.id, local);
   }
   return { up, base, items: [...items.values()].sort((a, b) => b.at - a.at) };
@@ -1141,8 +1192,11 @@ const SERVER_OPTIONS = {
   packageName: "@openscout/feed",
   product: "Feed",
   distDir: DIST,
-  getStatus: () => ({ localSessions: scanLocalFeedSessions().length }),
   apiHandler: async (req, res, { url, pathname }) => {
+    if (req.method === "GET" && pathname === "/api/status") {
+      sendJson(res, 200, await getStatus());
+      return true;
+    }
     if (req.method === "GET" && pathname === "/api/feed/sources") {
       sendJson(res, 200, { outside: [], quota: [] });
       return true;
@@ -1229,11 +1283,10 @@ function cli(argv = process.argv.slice(2)) {
       help: HELP,
       createServer: createFeedServer,
       getStatus: async () => {
-        const url = runtimeUrl();
-        const runtimeUp = await checkRuntime(url);
-        const localSessions = scanLocalFeedSessions().length;
+        const json = await getStatus();
+        const { runtimeUp, runtimeUrl: url, localSessions } = json;
         return {
-          json: { runtimeUp, runtimeUrl: url, localSessions },
+          json,
           lines: [
             `Runtime:  ${runtimeUp ? `up at ${url}` : "not running (run scout-feed setup to start it)"}`,
             `Sessions: ${localSessions} recent local transcripts discovered`

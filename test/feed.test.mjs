@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,8 +34,7 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
     ].join("\n") + "\n",
   );
 
-  process.env.SCOUT_SESSIONS_HOME = tempHome;
-  process.env.SCOUT_RUNTIME_URL = "http://127.0.0.1:1";
+  useTestEnvironment(t, { SCOUT_SESSIONS_HOME: tempHome, SCOUT_RUNTIME_URL: "http://127.0.0.1:1" });
 
   const server = createFeedServer();
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -82,6 +86,113 @@ test("serves prebuilt Feed HTML with embedded skeleton and populates from local 
   assert.equal(sessionRef.observe.data.events.length, 4);
   assert.equal(sessionRef.observe.data.events[1].tool, "Edit");
   assert.equal(sessionRef.observe.data.events[2].tool, "Write");
+});
+
+function useTestEnvironment(t, overrides) {
+  for (const [key, value] of Object.entries(overrides)) {
+    const previous = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+  }
+}
+
+async function listen(t, server) {
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  return server.address().port;
+}
+
+async function cliStatus() {
+  const bin = fileURLToPath(new URL("../bin/scout-feed.mjs", import.meta.url));
+  const { stdout } = await promisify(execFile)(process.execPath, [bin, "status", "--json"]);
+  return JSON.parse(stdout);
+}
+
+test("uses the loopback broker for feed reads and status when the configured TLS URL fails", async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "scout-feed-runtime-"));
+  t.after(() => fs.rmSync(tempHome, { recursive: true, force: true }));
+  useTestEnvironment(t, {
+    SCOUT_SESSIONS_HOME: tempHome,
+    SCOUT_RUNTIME_URL: undefined,
+    OPENSCOUT_BROKER_URL: undefined,
+  });
+
+  const port = await listen(t, createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/health") {
+      res.end("{}");
+    } else if (req.url.startsWith("/v1/feed/work?")) {
+      res.end(JSON.stringify({ tasks: [{ id: "loopback", reply: "Work from the local broker" }] }));
+    } else {
+      res.writeHead(404).end();
+    }
+  }));
+  const loopback = `http://127.0.0.1:${port}`;
+  const config = path.join(tempHome, ".openscout", "config.json");
+  fs.mkdirSync(path.dirname(config));
+  const feedPort = await listen(t, createFeedServer());
+  const base = `http://127.0.0.1:${feedPort}`;
+  const status = async () => (await fetch(`${base}/api/status`)).json();
+
+  // A reachable configured host wins over loopback, and uses the nested broker port.
+  fs.writeFileSync(config, JSON.stringify({ host: "localhost", ports: { broker: port } }));
+  assert.deepEqual(await status(), { runtimeUp: true, runtimeUrl: `http://localhost:${port}`, localSessions: 0 });
+
+  fs.writeFileSync(config, JSON.stringify({ url: `https://192.0.2.1:${port}` }));
+  const expected = { runtimeUp: true, runtimeUrl: loopback, localSessions: 0 };
+  assert.deepEqual(await status(), expected);
+  // A TLS request to the HTTP-only broker fails without waiting on the network.
+  fs.writeFileSync(config, JSON.stringify({ url: `https://127.0.0.1:${port}` }));
+  const feed = await (await fetch(`${base}/api/feed`)).json();
+  assert.deepEqual(feed.posts.map((post) => post.title), ["Work from the local broker"]);
+  assert.deepEqual(await cliStatus(), expected);
+
+  // Both explicit overrides must fail as configured, even with HTTP up on the same port.
+  for (const key of ["SCOUT_RUNTIME_URL", "OPENSCOUT_BROKER_URL"]) {
+    const explicit = `https://127.0.0.1:${port}`;
+    process.env[key] = explicit;
+    try {
+      assert.deepEqual(await status(), { runtimeUp: false, runtimeUrl: explicit, localSessions: 0 });
+    } finally {
+      delete process.env[key];
+    }
+  }
+});
+
+test("hides local Claude login and rate limit noise from the feed and status counts", async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "scout-feed-login-"));
+  t.after(() => fs.rmSync(tempHome, { recursive: true, force: true }));
+  useTestEnvironment(t, { SCOUT_SESSIONS_HOME: tempHome, SCOUT_RUNTIME_URL: "http://127.0.0.1:1" });
+  const claudeDir = path.join(tempHome, ".claude", "projects", "demo-app");
+  fs.mkdirSync(claudeDir, { recursive: true });
+  for (const [sessionId, reply] of [
+    ["timed-out", "Login reached its time limit · Please run /login"],
+    ["signed-out", "Please run /login"],
+    ["multiline-timeout", "Login reached its time limit\nPlease run /login"],
+    ["rate-limited", "You've hit your limit · resets 5pm (America/Montreal)"],
+    ["actual-work", "Documented how to recover from a login timeout."],
+    ["work-with-instructions", "Please run /login\nUpdated the sign-in docs and added tests."],
+  ]) {
+    fs.writeFileSync(path.join(claudeDir, `${sessionId}.jsonl`), [
+      { type: "user", sessionId, message: { content: "Update the sign-in docs" } },
+      { type: "assistant", sessionId, message: { content: [{ type: "text", text: reply }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  }
+
+  const port = await listen(t, createFeedServer());
+  const base = `http://127.0.0.1:${port}`;
+  const feed = await (await fetch(`${base}/api/feed`)).json();
+  assert.deepEqual(feed.posts.map((post) => post.owner.sessionId).sort(), ["actual-work", "work-with-instructions"]);
+  const hidden = await fetch(`${base}/api/feed/post/${encodeURIComponent("local:session:claude:timed-out")}`);
+  assert.equal(hidden.status, 404);
+  const status = await (await fetch(`${base}/api/status`)).json();
+  assert.equal(status.localSessions, 2);
+  assert.equal((await cliStatus()).localSessions, 2);
 });
 
 test("package.json stays npx-safe from git without triggering npm prepare/devDependencies", () => {
