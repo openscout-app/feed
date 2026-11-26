@@ -1098,9 +1098,9 @@ function headFromItem(item, version) {
     project: item.project
   };
 }
-function configuredRuntimeUrl(explicit) {
+function configuredRuntimeUrl() {
   const base = runtimeUrl();
-  if (explicit) return base;
+  if (process.env.SCOUT_RUNTIME_URL !== void 0 || process.env.OPENSCOUT_BROKER_URL !== void 0) return base;
   try {
     const home = process.env.SCOUT_SESSIONS_HOME || process.env.HOME || os.homedir();
     const config = JSON.parse(fs.readFileSync(path.join(home, ".openscout", "config.json"), "utf8"));
@@ -1120,10 +1120,10 @@ function configuredRuntimeUrl(explicit) {
   return base;
 }
 async function resolveRuntime() {
-  const explicit = process.env.SCOUT_RUNTIME_URL !== void 0 || process.env.OPENSCOUT_BROKER_URL !== void 0;
-  const base = configuredRuntimeUrl(explicit);
+  const strict = process.env.SCOUT_RUNTIME_URL !== void 0;
+  const base = configuredRuntimeUrl();
   const up = await checkRuntime(base);
-  if (!up && !explicit) {
+  if (!up && !strict) {
     let port = "43110";
     try {
       port = new URL(base).port || port;
@@ -1135,6 +1135,8 @@ async function resolveRuntime() {
   return { base, up };
 }
 const LOCAL_SESSION_NOISE = [
+  /^Failed to authenticate:\s*this login reached its time limit\b/i,
+  /^<heartbeat>$/i,
   /^Login reached its time limit(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
   /^Please run \/login[.!]?$/i,
   /^Not logged in(?:[.·—\s-]+Please run \/login)?[.!]?$/i,

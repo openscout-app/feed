@@ -152,19 +152,19 @@ test("uses the loopback broker for feed reads and status when the configured TLS
   assert.deepEqual(feed.posts.map((post) => post.title), ["Work from the local broker"]);
   assert.deepEqual(await cliStatus(), expected);
 
-  // Both explicit overrides must fail as configured, even with HTTP up on the same port.
-  for (const key of ["SCOUT_RUNTIME_URL", "OPENSCOUT_BROKER_URL"]) {
-    const explicit = `https://127.0.0.1:${port}`;
-    process.env[key] = explicit;
-    try {
-      assert.deepEqual(await status(), { runtimeUp: false, runtimeUrl: explicit, localSessions: 0 });
-    } finally {
-      delete process.env[key];
-    }
-  }
+  // An injected LAN endpoint takes precedence over config but can fall back.
+  fs.writeFileSync(config, JSON.stringify({ url: "http://127.0.0.1:1" }));
+  process.env.OPENSCOUT_BROKER_URL = `https://192.0.2.1:${port}`;
+  assert.deepEqual(await status(), expected);
+  assert.deepEqual(await cliStatus(), expected);
+
+  // A Feed-specific override stays strict even with a working loopback broker.
+  const strict = `https://127.0.0.1:${port}`;
+  process.env.SCOUT_RUNTIME_URL = strict;
+  assert.deepEqual(await status(), { runtimeUp: false, runtimeUrl: strict, localSessions: 0 });
 });
 
-test("hides local Claude login and rate limit noise from the feed and status counts", async (t) => {
+test("hides local login, rate limit, and heartbeat noise from the feed and status counts", async (t) => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "scout-feed-login-"));
   t.after(() => fs.rmSync(tempHome, { recursive: true, force: true }));
   useTestEnvironment(t, { SCOUT_SESSIONS_HOME: tempHome, SCOUT_RUNTIME_URL: "http://127.0.0.1:1" });
@@ -172,6 +172,7 @@ test("hides local Claude login and rate limit noise from the feed and status cou
   fs.mkdirSync(claudeDir, { recursive: true });
   for (const [sessionId, reply] of [
     ["timed-out", "Login reached its time limit · Please run /login"],
+    ["auth-timeout", "Failed to authenticate: this login reached its time limit. Please run /login again."],
     ["signed-out", "Please run /login"],
     ["multiline-timeout", "Login reached its time limit\nPlease run /login"],
     ["rate-limited", "You've hit your limit · resets 5pm (America/Montreal)"],
@@ -183,6 +184,12 @@ test("hides local Claude login and rate limit noise from the feed and status cou
       { type: "assistant", sessionId, message: { content: [{ type: "text", text: reply }] } },
     ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
   }
+  const codexDir = path.join(tempHome, ".codex", "sessions");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "rollout-heartbeat.jsonl"), [
+    { type: "session_meta", payload: { id: "heartbeat", cwd: "/tmp/demo-app" } },
+    { type: "response_item", payload: { role: "user", content: [{ type: "input_text", text: "  <HEARTBEAT>  " }] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 
   const port = await listen(t, createFeedServer());
   const base = `http://127.0.0.1:${port}`;

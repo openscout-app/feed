@@ -100,9 +100,9 @@ function headFromItem(item: FeedItemRecord, version: number) {
   };
 }
 
-function configuredRuntimeUrl(explicit: boolean) {
+function configuredRuntimeUrl() {
   const base = runtimeUrl();
-  if (explicit) return base;
+  if (process.env.SCOUT_RUNTIME_URL !== undefined || process.env.OPENSCOUT_BROKER_URL !== undefined) return base;
 
   // The pinned thin-server helper only reads the legacy top-level port.
   try {
@@ -124,10 +124,10 @@ function configuredRuntimeUrl(explicit: boolean) {
 }
 
 async function resolveRuntime() {
-  const explicit = process.env.SCOUT_RUNTIME_URL !== undefined || process.env.OPENSCOUT_BROKER_URL !== undefined;
-  const base = configuredRuntimeUrl(explicit);
+  const strict = process.env.SCOUT_RUNTIME_URL !== undefined;
+  const base = configuredRuntimeUrl();
   const up = await checkRuntime(base);
-  if (!up && !explicit) {
+  if (!up && !strict) {
     let port = "43110";
     try {
       port = new URL(base).port || port;
@@ -138,9 +138,11 @@ async function resolveRuntime() {
   return { base, up };
 }
 
-// Match the full reply so a substantive response that starts with a login
-// instruction still makes it into the feed.
+// Match the full reply for generic prompts so substantive responses that
+// mention /login still appear. The authentication error has a distinct prefix.
 const LOCAL_SESSION_NOISE = [
+  /^Failed to authenticate:\s*this login reached its time limit\b/i,
+  /^<heartbeat>$/i,
   /^Login reached its time limit(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
   /^Please run \/login[.!]?$/i,
   /^Not logged in(?:[.·—\s-]+Please run \/login)?[.!]?$/i,
